@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CyberGuard AI — SOC Log Anomaly & Threat Detection Platform</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Top Navigation Bar -->
+    <header class="navbar">
+      <div class="brand">
+        <div class="shield-icon">🛡️</div>
+        <div>
+          <h1>CyberGuard <span class="highlight">AI</span></h1>
+          <p class="subtitle">Bi-LSTM + Multi-Head Attention Log Anomaly Platform</p>
+        </div>
+      </div>
+      <div class="header-badges">
+        <span class="badge status-live"><span class="pulse"></span> System Active</span>
+        <span class="badge engine-badge">Adaptive KDE: α=0.02</span>
+        <span class="badge model-badge">PyTorch 2.x • GPU/CPU</span>
+      </div>
+    </header>
+
+    <!-- KPI Metric Cards -->
+    <section class="kpi-grid">
+      <div class="card kpi-card">
+        <div class="kpi-title">TOTAL LOGS ANALYZED</div>
+        <div class="kpi-val" id="metric-total">0</div>
+        <div class="kpi-sub">Drain3 Online Stream</div>
+      </div>
+      <div class="card kpi-card">
+        <div class="kpi-title">ANOMALIES DETECTED</div>
+        <div class="kpi-val text-red" id="metric-anomalies">0</div>
+        <div class="kpi-sub" id="metric-rate">Rate: 0.0%</div>
+      </div>
+      <div class="card kpi-card">
+        <div class="kpi-title">CRITICAL ALERTS</div>
+        <div class="kpi-val text-orange" id="metric-critical">0</div>
+        <div class="kpi-sub">KDE Out-of-Distribution</div>
+      </div>
+      <div class="card kpi-card">
+        <div class="kpi-title">AVG INFERENCE LATENCY</div>
+        <div class="kpi-val text-cyan" id="metric-latency">1.2 <span class="unit">ms</span></div>
+        <div class="kpi-sub">Per Session Window</div>
+      </div>
+    </section>
+
+    <!-- Main Workspace: Console & Analysis -->
+    <div class="main-layout">
+      <!-- Left Column: Ingestion Console -->
+      <section class="card console-section">
+        <div class="card-header">
+          <h2>📥 Log Stream Ingestion Console</h2>
+          <div class="console-actions">
+            <button class="btn btn-secondary" id="btn-sample-clean">Load Normal HDFS</button>
+            <button class="btn btn-danger" id="btn-simulate-attack">🚨 Simulate Attack</button>
+          </div>
+        </div>
+        <p class="section-desc">Paste raw unstructured syslog/HDFS lines or stream live security events:</p>
+        <textarea id="log-input" rows="8" placeholder="Paste unstructured server log lines here..."></textarea>
+        <div class="action-footer">
+          <button class="btn btn-primary" id="btn-analyze">
+            <span>⚡ Run Deep Learning Analysis</span>
+          </button>
+          <span class="inference-time" id="analysis-timer"></span>
+        </div>
+      </section>
+
+      <!-- Right Column: Benchmark Table -->
+      <section class="card benchmark-section">
+        <div class="card-header">
+          <h2>📊 Architecture Benchmark</h2>
+          <span class="tag">Empirical Results</span>
+        </div>
+        <p class="section-desc">Comparative performance on HDFS log benchmark:</p>
+        <div class="table-container">
+          <table class="benchmark-table">
+            <thead>
+              <tr>
+                <th>Architecture</th>
+                <th>Threshold</th>
+                <th>F1-Score</th>
+                <th>FPR</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>DeepLog</strong> (Baseline)</td>
+                <td><span class="tag-gray">Static Top-9</span></td>
+                <td>1.0000</td>
+                <td>0.00%</td>
+              </tr>
+              <tr>
+                <td><strong>DeepLog</strong> (Baseline)</td>
+                <td><span class="tag-green">Adaptive KDE</span></td>
+                <td>0.9740</td>
+                <td>2.00%</td>
+              </tr>
+              <tr>
+                <td><strong>Bi-LSTM + Attention</strong></td>
+                <td><span class="tag-gray">Static Top-9</span></td>
+                <td>0.9494</td>
+                <td>4.00%</td>
+              </tr>
+              <tr class="highlight-row">
+                <td><strong>CyberGuard AI (Ours)</strong></td>
+                <td><span class="tag-green">Adaptive KDE</span></td>
+                <td><strong>0.9317</strong></td>
+                <td><strong>5.50%</strong></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="benchmark-note">
+          ⚡ <strong>Key Innovation:</strong> 100% recall on anomaly sessions with dynamic continuous Gaussian KDE thresholding and token-level Multi-Head Attention triage heatmaps.
+        </div>
+      </section>
+    </div>
+
+    <!-- Results Timeline & Explainable AI (XAI) -->
+    <section class="card results-section" id="results-container">
+      <div class="card-header">
+        <h2>🔍 Session Timeline & Explainable AI (XAI) Attribution</h2>
+        <div class="session-status" id="session-badge-container"></div>
+      </div>
+      <div id="results-table-placeholder" class="empty-state">
+        Hit "Run Deep Learning Analysis" or "Simulate Attack" to inspect timeline and attention heatmaps.
+      </div>
+      <div id="results-content" style="display: none;">
+        <!-- Token Attention Heatmap Inspection Modal/Bar -->
+        <div class="xai-box">
+          <div class="xai-header">
+            <h3>🔥 Multi-Head Attention Heatmap: Context Token Attributions</h3>
+            <span class="xai-subtitle">Identifies specific prior log transitions driving anomaly probability</span>
+          </div>
+          <div class="heatmap-track" id="heatmap-container"></div>
+        </div>
+
+        <!-- Event List -->
+        <div class="table-container">
+          <table class="events-table">
+            <thead>
+              <tr>
+                <th width="5%">#</th>
+                <th width="45%">Raw Log Message</th>
+                <th width="15%">Template ID</th>
+                <th width="12%">Severity</th>
+                <th width="13%">Anomaly Score</th>
+                <th width="10%">Action</th>
+              </tr>
+            </thead>
+            <tbody id="events-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="app-footer">
+      <div>CyberGuard AI • Real-Time Distributed Log Anomaly Detection Platform</div>
+    </footer>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,67 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Caching & Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Virtual Environments
+.env
+.venv
+env/
+venv/
+ENV/
+
+# System Junk
+.DS_Store
+Thumbs.db
+desktop.ini
+*.tmp
+*.bak
+slide_*.png
+
+# IDE & Editor Settings
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Large Raw Datasets (Keep structure via .gitkeep)
+**/data/raw/*
+!**/data/raw/.gitkeep
+drain3_state.bin
+*.log
+
+# Checkpoints: Include trained model checkpoints
+!models/checkpoints/*.pt
+!models/checkpoints/*.pkl
+!**/models/checkpoints/*.pt
+!**/models/checkpoints/*.pkl
+
+# ==========================================================
+# Blacklist: Internal College Coursework & Scratch Files
+# ==========================================================
+# Administrative & Coursework documents
+*.docx
+*.pptx
+*.pdf
+CyberGuard_AI_Interactive_Presentation.html
+extracted_diary_logo.jpg
+SYLLABUS.md
+Synopsis/
+Report/
+
+# Scratch script generators
+build_presentation.py
+generate_work_diary.py
+generate_minor_project_guide_pdf.py
+generate_presentation_guide_pdf.py
+generate_demo_and_viva_guide_pdf.py
+create_colab_notebook.py
+
+# Internal documentation and college notes
+docs/
