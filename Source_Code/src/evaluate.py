@@ -1,121 +1,110 @@
 """
 src/evaluate.py
 Evaluation and Benchmark Comparison Engine.
-
-Compares DeepLog Baseline (Top-k) vs Attention-BiLSTM (Top-k and Adaptive KDE).
-Calculates Precision, Recall, F1-Score, False Positive Rate (FPR).
-
-Methodology:
-  - Top-k evaluation: follows DeepLog's original rule — flag a session if
-    ANY transition's true next event is not in the top-k predictions.
-  - KDE evaluation: computes the session-level max negative log-likelihood
-    (NLL) across all transitions, then compares this aggregate against the
-    KDE-derived threshold tau. This avoids the multi-testing inflation that
-    occurs when checking each event independently, while preserving sensitivity
-    to sparse anomaly transitions.
+Compares DeepLog Baseline (Top-K & Adaptive KDE) vs Attention-BiLSTM (Top-K & Adaptive KDE).
+Uses batched per-session tensor evaluation for sub-10ms CPU inference latency.
 """
 
+import time
 import torch
 import numpy as np
 import pandas as pd
 from typing import List, Dict, Any, Tuple
-from sklearn.metrics import precision_score, recall_score, f1_score, confusion_matrix
+from sklearn.metrics import (
+    precision_score,
+    recall_score,
+    f1_score,
+    confusion_matrix,
+    roc_auc_score,
+    average_precision_score,
+)
 
-from src.models.deeplog import DeepLog
 from src.models.attention_bilstm import AttentionBiLSTM
 from src.threshold import AdaptiveKDEScorer
 
 
-def _build_sliding_window(sequence: List[int], idx: int, window_size: int) -> List[int]:
-    """Constructs zero-padded sliding window ending at position idx."""
-    if idx < window_size:
-        return [0] * (window_size - (idx + 1)) + sequence[: idx + 1]
-    return sequence[idx - window_size + 1 : idx + 1]
+def _build_session_windows(sequence: List[int], window_size: int) -> Tuple[List[List[int]], List[int]]:
+    """Builds all causal sliding windows and target IDs for a session in one batch."""
+    windows = []
+    targets = []
+    for idx in range(1, len(sequence)):
+        ctx = sequence[max(0, idx - window_size) : idx]
+        if len(ctx) < window_size:
+            ctx = [0] * (window_size - len(ctx)) + ctx
+        windows.append(ctx)
+        targets.append(sequence[idx])
+    return windows, targets
 
 
 def evaluate_session_topk(
     model: torch.nn.Module,
     sequence: List[int],
     window_size: int = 10,
-    top_k: int = 9,
-    device: str = "cpu"
-) -> bool:
+    top_k: int = 5,
+    device: str = "cpu",
+) -> Tuple[bool, float]:
     """
     Session-level evaluation using DeepLog's Top-k rule:
-    If ANY actual next event in the sequence is NOT in the top-k predicted
-    candidates, the entire session is flagged as an ANOMALY (True).
+    Flags a session if ANY actual next event is NOT in the top-k predicted candidates.
     """
     if len(sequence) < 2:
-        return False
+        return False, 0.0
 
+    windows, targets = _build_session_windows(sequence, window_size)
     model.eval()
     with torch.no_grad():
-        for i in range(len(sequence) - 1):
-            inp = _build_sliding_window(sequence, i, window_size)
-            inp_t = torch.tensor([inp], dtype=torch.long, device=device)
-            target = sequence[i + 1]
+        inp_t = torch.tensor(windows, dtype=torch.long, device=device)
+        if isinstance(model, AttentionBiLSTM):
+            logits, _ = model(inp_t)
+        else:
+            logits = model(inp_t)
 
-            if isinstance(model, AttentionBiLSTM):
-                logits, _ = model(inp_t)
-            else:
-                logits = model(inp_t)
+        probs = torch.softmax(logits, dim=-1)
+        k = min(top_k, probs.size(-1))
+        topk_indices = torch.topk(probs, k=k, dim=-1).indices  # (T, k)
 
-            probs = torch.softmax(logits, dim=-1)
-            top_candidates = torch.topk(
-                probs, k=min(top_k, logits.size(-1)), dim=-1
-            ).indices[0].tolist()
+        flagged = False
+        max_nll = 0.0
+        for row_idx, tgt in enumerate(targets):
+            tgt_clamped = min(tgt, probs.size(-1) - 1)
+            p_obs = max(probs[row_idx, tgt_clamped].item(), 1e-12)
+            max_nll = max(max_nll, -float(np.log(p_obs)))
+            if tgt not in topk_indices[row_idx].tolist():
+                flagged = True
 
-            if target not in top_candidates:
-                return True  # Anomaly detected
-
-    return False
+    return flagged, max_nll
 
 
 def compute_session_nll(
     model: torch.nn.Module,
     sequence: List[int],
     window_size: int = 10,
-    device: str = "cpu"
-) -> Tuple[float, List[float], List[List[float]]]:
+    device: str = "cpu",
+) -> Tuple[float, float, List[float], List[List[float]]]:
     """
-    Computes per-transition negative log-likelihoods (NLL) across all
-    transitions in a session, returning both the session max-event NLL
-    (the primary anomaly decision statistic) and mean NLL (for sequence health).
-    Also collects attention attributions (when the model is AttentionBiLSTM).
-
-    Returns:
-        session_max_nll:   the max of -log(P(true_next)) across all steps.
-        session_mean_nll:  the mean of -log(P(true_next)) across all steps.
-        per_event_nlls:    list of NLL values, one per transition.
-        all_attributions:  list of attention weight vectors (empty for DeepLog).
+    Computes batched per-transition NLLs and attention attributions across a session.
+    Returns (session_max_nll, session_mean_nll, per_event_nlls, all_attributions).
     """
     if len(sequence) < 2:
         return 0.0, 0.0, [], []
 
+    windows, targets = _build_session_windows(sequence, window_size)
     model.eval()
-    per_event_nlls = []
-    all_attributions = []
-
     with torch.no_grad():
-        for i in range(len(sequence) - 1):
-            inp = _build_sliding_window(sequence, i, window_size)
-            inp_t = torch.tensor([inp], dtype=torch.long, device=device)
-            target = sequence[i + 1]
+        inp_t = torch.tensor(windows, dtype=torch.long, device=device)
+        if isinstance(model, AttentionBiLSTM):
+            logits, attn_weights = model(inp_t)
+            all_attributions = attn_weights[:, -1, :].cpu().numpy().tolist()
+        else:
+            logits = model(inp_t)
+            all_attributions = []
 
-            if isinstance(model, AttentionBiLSTM):
-                logits, attn_weights = model(inp_t)
-                attn = attn_weights[0, -1, :].cpu().numpy().tolist()
-                all_attributions.append(attn)
-            else:
-                logits = model(inp_t)
-
-            probs = torch.softmax(logits, dim=-1)
-            tgt_idx = min(target, probs.size(-1) - 1)
-            observed_prob = max(probs[0, tgt_idx].item(), 1e-12)
-
-            # Negative log-likelihood for this transition
-            nll = -np.log(observed_prob)
-            per_event_nlls.append(nll)
+        probs = torch.softmax(logits, dim=-1)
+        tgt_clamped = torch.tensor(
+            [min(t, probs.size(-1) - 1) for t in targets], dtype=torch.long, device=device
+        )
+        obs_probs = probs[torch.arange(len(targets), device=device), tgt_clamped].clamp(min=1e-12)
+        per_event_nlls = (-torch.log(obs_probs)).cpu().numpy().tolist()
 
     session_max_nll = float(np.max(per_event_nlls)) if per_event_nlls else 0.0
     session_mean_nll = float(np.mean(per_event_nlls)) if per_event_nlls else 0.0
@@ -127,46 +116,23 @@ def evaluate_session_kde(
     kde_scorer: AdaptiveKDEScorer,
     sequence: List[int],
     window_size: int = 10,
-    device: str = "cpu"
-) -> Tuple[bool, float, List[List[float]]]:
-    """
-    Session-level evaluation using Adaptive KDE threshold.
-
-    Uses the **max per-event NLL** as the session-level statistic.
-    This captures sparse anomalous transitions that would be diluted
-    by averaging across many normal transitions in long sessions.
-
-    Steps:
-      1. Compute NLL for every transition in the session.
-      2. Take the session max NLL (worst-case transition).
-      3. Score the max NLL against the KDE-derived threshold tau.
-
-    Returns:
-        is_anomaly:      True if the session max NLL exceeds tau.
-        severity:        normalized severity score [0, 1].
-        all_attributions: attention weight vectors per transition (if BiLSTM).
-    """
+    device: str = "cpu",
+) -> Tuple[bool, float, float, List[List[float]]]:
+    """Evaluates session max per-event NLL against Adaptive KDE threshold tau."""
     session_max_nll, _, _, all_attributions = compute_session_nll(
         model, sequence, window_size, device
     )
-
     is_anomaly, severity, _ = kde_scorer.score(session_max_nll)
-    return is_anomaly, severity, all_attributions
+    return is_anomaly, severity, session_max_nll, all_attributions
 
 
 def collect_session_nlls(
     model: torch.nn.Module,
     sequences: List[List[int]],
     window_size: int = 10,
-    device: str = "cpu"
+    device: str = "cpu",
 ) -> np.ndarray:
-    """
-    Computes session-level max NLLs for a list of sequences.
-    Used to fit the KDE scorer on normal validation sessions.
-
-    Returns max per-event NLL per session (not mean), since anomalies
-    manifest as individual event spikes within sessions.
-    """
+    """Computes session-level max NLLs for normal validation sequences."""
     nlls = []
     for seq in sequences:
         max_nll, _, _, _ = compute_session_nll(model, seq, window_size, device)
@@ -174,19 +140,48 @@ def collect_session_nlls(
     return np.array(nlls, dtype=np.float64)
 
 
+def _compute_metrics_row(
+    name: str,
+    strategy: str,
+    y_true: np.ndarray,
+    preds: List[int],
+    scores: List[float],
+    latencies_ms: List[float],
+) -> Dict[str, Any]:
+    p = precision_score(y_true, preds, zero_division=0)
+    r = recall_score(y_true, preds, zero_division=0)
+    f1 = f1_score(y_true, preds, zero_division=0)
+    if len(np.unique(y_true)) > 1:
+        tn, fp, fn, tp = confusion_matrix(y_true, preds).ravel()
+        roc_auc = roc_auc_score(y_true, scores)
+        pr_auc = average_precision_score(y_true, scores)
+    else:
+        tn, fp, fn, tp = 0, 0, 0, 0
+        roc_auc, pr_auc = 0.0, 0.0
+    fpr = fp / (fp + tn) if (fp + tn) > 0 else 0.0
+    avg_lat = float(np.mean(latencies_ms)) if latencies_ms else 0.0
+
+    return {
+        "Architecture": name,
+        "Threshold Strategy": strategy,
+        "Precision": round(float(p), 4),
+        "Recall": round(float(r), 4),
+        "F1-Score": round(float(f1), 4),
+        "FPR": round(float(fpr), 4),
+        "ROC-AUC": round(float(roc_auc), 4),
+        "PR-AUC": round(float(pr_auc), 4),
+        "Latency (ms)": round(avg_lat, 2),
+    }
+
+
 def run_benchmark_suite(
     models_dict: Dict[str, Tuple[torch.nn.Module, AdaptiveKDEScorer]],
     test_df: pd.DataFrame,
     window_size: int = 10,
-    top_k: int = 9,
-    device: str = "cpu"
+    top_k: int = 5,
+    device: str = "cpu",
 ) -> pd.DataFrame:
-    """
-    Runs full comparative benchmark across test sessions.
-    Evaluates:
-      1. Each model with static Top-k thresholding.
-      2. Each model with Adaptive KDE (session-level max NLL) thresholding.
-    """
+    """Runs comparative benchmark comparing Static Top-K vs Adaptive KDE."""
     y_true = test_df["is_anomaly"].values
     results = []
 
@@ -197,59 +192,45 @@ def run_benchmark_suite(
         model.eval()
 
         # ------ Method A: Top-k Evaluation ------
-        preds_topk = []
+        preds_topk, scores_topk, lats_topk = [], [], []
         for seq in test_df["sequence"]:
-            pred = evaluate_session_topk(
+            t0 = time.perf_counter()
+            pred, max_nll = evaluate_session_topk(
                 model, seq, window_size=window_size, top_k=top_k, device=device
             )
+            lats_topk.append((time.perf_counter() - t0) * 1000.0)
             preds_topk.append(1 if pred else 0)
+            scores_topk.append(max_nll)
 
-        p_k = precision_score(y_true, preds_topk, zero_division=0)
-        r_k = recall_score(y_true, preds_topk, zero_division=0)
-        f1_k = f1_score(y_true, preds_topk, zero_division=0)
-        tn, fp, fn, tp = confusion_matrix(
-            y_true, preds_topk
-        ).ravel() if len(np.unique(y_true)) > 1 else (0, 0, 0, 0)
-        fpr_k = fp / (fp + tn) if (fp + tn) > 0 else 0.0
-
-        results.append({
-            "Architecture": name,
-            "Threshold Strategy": f"Static Top-{top_k}",
-            "Precision": round(p_k, 4),
-            "Recall": round(r_k, 4),
-            "F1-Score": round(f1_k, 4),
-            "FPR": round(fpr_k, 4)
-        })
+        results.append(
+            _compute_metrics_row(name, f"Static Top-{top_k}", y_true, preds_topk, scores_topk, lats_topk)
+        )
 
         # ------ Method B: Adaptive KDE (Session Max-NLL) ------
         if kde_scorer is not None:
-            preds_kde = []
-            scores_kde = []
+            preds_kde, scores_kde, lats_kde = [], [], []
             for seq in test_df["sequence"]:
-                flag, sev, _ = evaluate_session_kde(
+                t0 = time.perf_counter()
+                flag, sev, max_nll, _ = evaluate_session_kde(
                     model, kde_scorer, seq, window_size=window_size, device=device
                 )
+                lats_kde.append((time.perf_counter() - t0) * 1000.0)
                 preds_kde.append(1 if flag else 0)
-                scores_kde.append(sev)
+                scores_kde.append(max_nll)
 
-            p_kde = precision_score(y_true, preds_kde, zero_division=0)
-            r_kde = recall_score(y_true, preds_kde, zero_division=0)
-            f1_kde = f1_score(y_true, preds_kde, zero_division=0)
-            tn, fp, fn, tp = confusion_matrix(
-                y_true, preds_kde
-            ).ravel() if len(np.unique(y_true)) > 1 else (0, 0, 0, 0)
-            fpr_kde = fp / (fp + tn) if (fp + tn) > 0 else 0.0
+            results.append(
+                _compute_metrics_row(name, "Adaptive KDE (Session NLL)", y_true, preds_kde, scores_kde, lats_kde)
+            )
 
-            results.append({
-                "Architecture": name,
-                "Threshold Strategy": "Adaptive KDE (Session NLL)",
-                "Precision": round(p_kde, 4),
-                "Recall": round(r_kde, 4),
-                "F1-Score": round(f1_kde, 4),
-                "FPR": round(fpr_kde, 4)
-            })
+            if "anomaly_category" in test_df.columns:
+                tmp_df = test_df.copy()
+                tmp_df["pred"] = preds_kde
+                print(f"\n  [{name} + Adaptive KDE] Recall by Anomaly Class:")
+                for cat, grp in tmp_df[tmp_df["is_anomaly"] == 1].groupby("anomaly_category"):
+                    cat_rec = grp["pred"].mean()
+                    print(f"    - {cat:20s}: {cat_rec:.2%} ({int(grp['pred'].sum())}/{len(grp)})")
 
     results_df = pd.DataFrame(results)
-    print(results_df.to_string(index=False))
+    print("\n" + results_df.to_string(index=False))
     print("===================================================================================\n")
     return results_df

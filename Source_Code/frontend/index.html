@@ -3,27 +3,29 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>CyberGuard AI — SOC Log Anomaly & Threat Detection Platform</title>
+  <title>CyberGuard AI — Autonomous SOC Log Anomaly & Threat Detection Platform</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛡️</text></svg>">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
   <div class="app-container">
-    <!-- Top Navigation Bar -->
+    <!-- Top Command Bar -->
     <header class="navbar">
       <div class="brand">
         <div class="shield-icon">🛡️</div>
         <div>
           <h1>CyberGuard <span class="highlight">AI</span></h1>
-          <p class="subtitle">Bi-LSTM + Multi-Head Attention Log Anomaly Platform</p>
+          <p class="subtitle">Drain3 + Positional Pad-Masked Bi-LSTM + Multi-Head Attention + Adaptive KDE</p>
         </div>
       </div>
       <div class="header-badges">
-        <span class="badge status-live"><span class="pulse"></span> System Active</span>
-        <span class="badge engine-badge">Adaptive KDE: α=0.02</span>
-        <span class="badge model-badge">PyTorch 2.x • GPU/CPU</span>
+        <span class="badge status-live" id="badge-status"><span class="pulse"></span> Engine Active</span>
+        <span class="badge engine-badge" id="badge-tau">KDE τ: -- (α=0.02)</span>
+        <span class="badge model-badge" id="badge-device">PyTorch • CPU</span>
+        <button class="btn btn-secondary btn-xs" id="btn-reset-telemetry" title="Reset live session counters">Reset Counters</button>
       </div>
     </header>
 
@@ -32,112 +34,156 @@
       <div class="card kpi-card">
         <div class="kpi-title">TOTAL LOGS ANALYZED</div>
         <div class="kpi-val" id="metric-total">0</div>
-        <div class="kpi-sub">Drain3 Online Stream</div>
+        <div class="kpi-sub">Frozen Drain3 Inference Match</div>
       </div>
       <div class="card kpi-card">
-        <div class="kpi-title">ANOMALIES DETECTED</div>
+        <div class="kpi-title">ANOMALOUS SESSIONS</div>
         <div class="kpi-val text-red" id="metric-anomalies">0</div>
-        <div class="kpi-sub" id="metric-rate">Rate: 0.0%</div>
+        <div class="kpi-sub" id="metric-rate">Rate: 0.00%</div>
       </div>
       <div class="card kpi-card">
         <div class="kpi-title">CRITICAL ALERTS</div>
         <div class="kpi-val text-orange" id="metric-critical">0</div>
-        <div class="kpi-sub">KDE Out-of-Distribution</div>
+        <div class="kpi-sub">Severity Score ≥ 0.70</div>
       </div>
       <div class="card kpi-card">
-        <div class="kpi-title">AVG INFERENCE LATENCY</div>
-        <div class="kpi-val text-cyan" id="metric-latency">1.2 <span class="unit">ms</span></div>
-        <div class="kpi-sub">Per Session Window</div>
+        <div class="kpi-title">AVG SESSION LATENCY</div>
+        <div class="kpi-val text-cyan" id="metric-latency">-- <span class="unit">ms</span></div>
+        <div class="kpi-sub">End-to-End Inference</div>
       </div>
     </section>
 
-    <!-- Main Workspace: Console & Analysis -->
+    <!-- Main Workbench: Left Ingestion Console & Right Visual Proof / Benchmark -->
     <div class="main-layout">
       <!-- Left Column: Ingestion Console -->
       <section class="card console-section">
         <div class="card-header">
-          <h2>📥 Log Stream Ingestion Console</h2>
+          <h2>📥 Log Stream Ingestion & Attack Console</h2>
           <div class="console-actions">
             <button class="btn btn-secondary" id="btn-sample-clean">Load Normal HDFS</button>
+            <select id="attack-scenario" class="select-input" title="Choose Attack Vector">
+              <option value="zero_day">Zero-Day Security Intrusion</option>
+              <option value="order_violation">Stealthy INFO Order Violation</option>
+              <option value="long_range">Long-Range Lifecycle Skip</option>
+            </select>
             <button class="btn btn-danger" id="btn-simulate-attack">🚨 Simulate Attack</button>
           </div>
         </div>
-        <p class="section-desc">Paste raw unstructured syslog/HDFS lines or stream live security events:</p>
-        <textarea id="log-input" rows="8" placeholder="Paste unstructured server log lines here..."></textarea>
-        <div class="action-footer">
-          <button class="btn btn-primary" id="btn-analyze">
-            <span>⚡ Run Deep Learning Analysis</span>
-          </button>
-          <span class="inference-time" id="analysis-timer"></span>
+        <p class="section-desc">
+          Paste raw HDFS/Syslog lines, upload a <code>.log</code> file for Block-ID auto-grouping, or replay real Loghub HDFS telemetry:
+        </p>
+
+        <textarea id="log-input" rows="9" placeholder="Paste unstructured server log lines here..."></textarea>
+
+        <div class="console-toolbar">
+          <div class="toolbar-left">
+            <button class="btn btn-primary" id="btn-analyze">⚡ Analyze Session</button>
+            <button class="btn btn-secondary" id="btn-analyze-batch" title="Automatically partition mixed log lines by HDFS blk_* Block ID">🧩 Group by Block ID</button>
+          </div>
+          <div class="toolbar-right">
+            <label class="btn btn-secondary file-btn" for="log-file-input">📂 Upload .log</label>
+            <input type="file" id="log-file-input" accept=".log,.txt" hidden>
+            <button class="btn btn-accent" id="btn-stream-hdfs">📡 Stream HDFS Sample</button>
+          </div>
+        </div>
+        <div class="status-bar">
+          <span class="inference-time" id="analysis-timer">Ready</span>
+          <span class="stream-indicator" id="stream-status"></span>
         </div>
       </section>
 
-      <!-- Right Column: Benchmark Table -->
-      <section class="card benchmark-section">
+      <!-- Right Column: Interactive Math & Empirical Benchmark Tabs -->
+      <section class="card visual-section">
         <div class="card-header">
-          <h2>📊 Architecture Benchmark</h2>
-          <span class="tag">Empirical Results</span>
+          <div class="tab-group">
+            <button class="tab-btn active" data-tab="tab-kde">📈 Live KDE & NLL Proof</button>
+            <button class="tab-btn" data-tab="tab-bench">📊 Empirical Benchmark</button>
+          </div>
+          <span class="tag" id="right-panel-badge">CDF Quantile α=0.02</span>
         </div>
-        <p class="section-desc">Comparative performance on HDFS log benchmark:</p>
-        <div class="table-container">
-          <table class="benchmark-table">
-            <thead>
-              <tr>
-                <th>Architecture</th>
-                <th>Threshold</th>
-                <th>F1-Score</th>
-                <th>FPR</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td><strong>DeepLog</strong> (Baseline)</td>
-                <td><span class="tag-gray">Static Top-9</span></td>
-                <td>1.0000</td>
-                <td>0.00%</td>
-              </tr>
-              <tr>
-                <td><strong>DeepLog</strong> (Baseline)</td>
-                <td><span class="tag-green">Adaptive KDE</span></td>
-                <td>0.9740</td>
-                <td>2.00%</td>
-              </tr>
-              <tr>
-                <td><strong>Bi-LSTM + Attention</strong></td>
-                <td><span class="tag-gray">Static Top-9</span></td>
-                <td>0.9494</td>
-                <td>4.00%</td>
-              </tr>
-              <tr class="highlight-row">
-                <td><strong>CyberGuard AI (Ours)</strong></td>
-                <td><span class="tag-green">Adaptive KDE</span></td>
-                <td><strong>0.9317</strong></td>
-                <td><strong>5.50%</strong></td>
-              </tr>
-            </tbody>
-          </table>
+
+        <!-- Tab 1: KDE Probability Density + Per-Event NLL Spike Chart -->
+        <div id="tab-kde" class="tab-pane active">
+          <div class="chart-block">
+            <div class="chart-title-row">
+              <span>Gaussian KDE Normal Density f̂(NLL) vs Threshold τ</span>
+              <span class="chart-legend" id="kde-readout">Session Max NLL: --</span>
+            </div>
+            <div id="kde-chart-container" class="svg-chart-box">
+              <div class="empty-mini">Loading fitted KDE density curve...</div>
+            </div>
+          </div>
+
+          <div class="chart-block">
+            <div class="chart-title-row">
+              <span>Per-Event Negative Log-Likelihood (NLL = −log P)</span>
+              <span class="chart-legend">Dashed line = KDE τ</span>
+            </div>
+            <div id="nll-chart-container" class="svg-chart-box">
+              <div class="empty-mini">Run analysis to view per-transition NLL spikes.</div>
+            </div>
+          </div>
         </div>
-        <div class="benchmark-note">
-          ⚡ <strong>Key Innovation:</strong> 100% recall on anomaly sessions with dynamic continuous Gaussian KDE thresholding and token-level Multi-Head Attention triage heatmaps.
+
+        <!-- Tab 2: Live Benchmark Table from CSV -->
+        <div id="tab-bench" class="tab-pane">
+          <p class="section-desc">Live benchmark metrics loaded directly from <code>data/processed/benchmark_results.csv</code>:</p>
+          <div class="table-container">
+            <table class="benchmark-table">
+              <thead>
+                <tr>
+                  <th>Architecture</th>
+                  <th>Threshold</th>
+                  <th>Prec</th>
+                  <th>Rec</th>
+                  <th>F1</th>
+                  <th>FPR</th>
+                  <th>AUC</th>
+                </tr>
+              </thead>
+              <tbody id="benchmark-tbody">
+                <tr><td colspan="7" style="text-align:center;color:var(--text-muted);">Loading benchmark metrics...</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="benchmark-note" id="benchmark-note">
+            ⚡ <strong>Why Adaptive KDE + Attention Wins:</strong> Static Top-K fails on stealthy normal-token order violations or over-alerts on rare benign sequences. Adaptive KDE calibrates τ from the continuous NLL CDF while Multi-Head Attention attends across interleaved threads.
+          </div>
         </div>
       </section>
     </div>
 
+    <!-- Multi-Session Switcher (Visible when batch/file upload yields >= 2 sessions) -->
+    <section class="card sessions-drawer" id="sessions-drawer" style="display: none;">
+      <div class="card-header">
+        <h2>🧩 Partitioned Block Sessions (<span id="batch-session-count">0</span>)</h2>
+        <span class="tag" id="batch-anomaly-summary">0 Anomalous</span>
+      </div>
+      <div class="session-pills" id="session-pills"></div>
+    </section>
+
     <!-- Results Timeline & Explainable AI (XAI) -->
     <section class="card results-section" id="results-container">
       <div class="card-header">
-        <h2>🔍 Session Timeline & Explainable AI (XAI) Attribution</h2>
+        <h2>🔍 Session Timeline & Explainable AI (XAI) Triage</h2>
         <div class="session-status" id="session-badge-container"></div>
       </div>
+
       <div id="results-table-placeholder" class="empty-state">
-        Hit "Run Deep Learning Analysis" or "Simulate Attack" to inspect timeline and attention heatmaps.
+        Run analysis, simulate an attack vector, or upload a <code>.log</code> file to inspect NLL scoring and token attributions.
       </div>
+
       <div id="results-content" style="display: none;">
-        <!-- Token Attention Heatmap Inspection Modal/Bar -->
+        <!-- Plain-English Diagnostic Banner -->
+        <div class="triage-banner" id="triage-banner"></div>
+
+        <!-- Token Attention Heatmap Inspection -->
         <div class="xai-box">
           <div class="xai-header">
-            <h3>🔥 Multi-Head Attention Heatmap: Context Token Attributions</h3>
-            <span class="xai-subtitle">Identifies specific prior log transitions driving anomaly probability</span>
+            <div>
+              <h3>🔥 Multi-Head Attention Context Attributions <span id="xai-inspected-line" class="tag-gray"></span></h3>
+              <span class="xai-subtitle">Shows which preceding non-PAD log events the model weighted most heavily when scoring the selected line</span>
+            </div>
           </div>
           <div class="heatmap-track" id="heatmap-container"></div>
         </div>
@@ -148,11 +194,12 @@
             <thead>
               <tr>
                 <th width="5%">#</th>
-                <th width="45%">Raw Log Message</th>
-                <th width="15%">Template ID</th>
-                <th width="12%">Severity</th>
-                <th width="13%">Anomaly Score</th>
-                <th width="10%">Action</th>
+                <th width="41%">Raw Log Message</th>
+                <th width="20%">Drain3 Template</th>
+                <th width="9%">NLL</th>
+                <th width="10%">Severity</th>
+                <th width="7%">Score</th>
+                <th width="8%">XAI</th>
               </tr>
             </thead>
             <tbody id="events-tbody"></tbody>
@@ -163,7 +210,8 @@
 
     <!-- Footer -->
     <footer class="app-footer">
-      <div>CyberGuard AI • Real-Time Distributed Log Anomaly Detection Platform</div>
+      <div>CyberGuard AI • Autonomous SOC Log Anomaly Detection & Explainable AI Platform</div>
+      <div class="guide-note">Drain3 Frozen Match • Positional Pad-Masked Bi-LSTM + Attention • Adaptive Gaussian KDE</div>
     </footer>
   </div>
 

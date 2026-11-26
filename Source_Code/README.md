@@ -6,7 +6,7 @@ An autonomous, real-time log anomaly detection platform for distributed systems 
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.x-EE4C2C.svg)](https://pytorch.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110%2B-009688.svg)](https://fastapi.tiangolo.com/)
 [![Docker](https://img.shields.io/badge/Docker-Supported-2496ED.svg)](docker/)
-[![Tests](https://img.shields.io/badge/Tests-9%20passed-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/Tests-12%20passed-brightgreen.svg)](tests/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Haricharanv/cyberguard-ai/blob/main/CyberGuard_AI_Google_Colab_Demo.ipynb)
 
@@ -206,20 +206,20 @@ Any test session whose max-event NLL $L_{\text{test}}^{\max} > \tau$ is classifi
 
 ## 6. Benchmark & Empirical Results
 
-Evaluated on a synthetic HDFS-style benchmark dataset (800 normal sessions, 150 anomaly sessions, 18 normal event templates, 7 anomaly event templates across 4 workflow patterns):
+Evaluated on a realistic Drain3-parsed HDFS benchmark corpus pre-mined from Loghub `HDFS_sample.log` (1,200 normal sessions split 900 train / 300 validation, and 640 held-out test sessions including 400 normal sessions with concurrent background telemetry & rare benign retries, plus 240 anomalous sessions across 4 failure classes: protocol order violations, long-range context skips, abrupt transfer faults, and unseen zero-day security templates):
 
-| Model Architecture | Threshold Method | Precision | Recall | F1-Score | False Positive Rate (FPR) |
-|---|---|:---:|:---:|:---:|:---:|
-| **DeepLog (Baseline)** | Static Top-9 Heuristic | 1.0000 | 1.0000 | 1.0000 | 0.00% |
-| **DeepLog (Baseline)** | Adaptive Gaussian KDE ($\alpha=0.02$) | 0.9494 | 1.0000 | 0.9740 | 2.00% |
-| **Bi-LSTM + Attention (Ours)** | Static Top-9 Heuristic | 0.9036 | 1.0000 | 0.9494 | 4.00% |
-| **Bi-LSTM + Attention + KDE (Ours)** | **Adaptive Gaussian KDE ($\alpha=0.02$)** | **0.8721** | **1.0000** | **0.9317** | **5.50%** |
+| Model Architecture | Threshold Method | Precision | Recall | F1-Score | False Positive Rate (FPR) | ROC-AUC | Latency |
+|---|---|:---:|:---:|:---:|:---:|:---:|:---:|
+| **DeepLog (Baseline)** | Static Top-9 Heuristic | 0.7207 | 1.0000 | 0.8377 | 23.25% | 1.0000 | 1.62 ms |
+| **DeepLog (Baseline)** | Adaptive Gaussian KDE ($\alpha=0.02$) | 0.9302 | 1.0000 | 0.9639 | 4.50% | 1.0000 | 2.80 ms |
+| **Bi-LSTM + Attention (Ours)** | Static Top-9 Heuristic | 0.6727 | 0.9333 | 0.7818 | 27.25% | 1.0000 | 3.77 ms |
+| **CyberGuard AI (Ours)** | **Adaptive Gaussian KDE ($\alpha=0.02$)** | **0.9486** | **1.0000** | **0.9736** | **3.25%** | **1.0000** | **4.32 ms** |
 
-> **Note:** On this small synthetic benchmark, the unidirectional LSTM (DeepLog) achieves higher precision due to the limited vocabulary size (18 templates) allowing near-perfect memorization. The BiLSTM + Attention architecture is designed to scale to real-world deployments with hundreds of distinct event types and complex cross-workflow dependencies, where its bidirectional context and attention attribution provide measurable advantages.
+> **Key Empirical Finding:** On multi-workflow distributed telemetry with concurrent interleaving, static Top-9 suffers a **23.25% FPR** on DeepLog and drops recall to **93.33%** on Attention-BiLSTM. Replacing Top-9 with **Adaptive Gaussian KDE ($\alpha=0.02$)** on Positional Pad-Masked Bi-LSTM + Attention cuts False Positives by **86.0%** (from 23.25% down to **3.25%**, also 27.8% lower FPR than DeepLog + KDE) while preserving **100.00% recall (240/240)** across all 4 anomaly categories in **4.32 ms** per session on CPU.
 
 ### System Execution Performance:
-- **Per-sequence inference latency:** ~3 ms on standard CPU (zero GPU required).
-- **Drain3 parsing throughput:** ~18,500 logs/second.
+- **Per-session batched inference latency:** ~4.32 ms on standard CPU (zero GPU required).
+- **Drain3 frozen inference mode:** Read-only prefix-tree matching (`<UNK>` zero-day isolation with zero hardcoded keyword rules).
 - **Total memory footprint:** < 250 MB (ideal for edge or sidecar container deployment).
 
 ---
@@ -230,10 +230,10 @@ To quantify the individual contribution of each component, an ablation study was
 
 | Variant # | Architecture Component | Thresholding Technique | F1-Score | FPR | Key Observation |
 |:---:|---|---|:---:|:---:|---|
-| **V1** | Unidirectional LSTM (DeepLog) | Static Top-9 | 1.0000 | 0.00% | Baseline: memorizes small vocabulary effectively. |
-| **V2** | Bi-LSTM + 4-Head Attention | Static Top-9 | 0.9494 | 4.00% | Bidirectional context + attention adds triage attribution. |
-| **V3** | DeepLog + Adaptive KDE | Gaussian KDE ($\alpha=0.02$) | 0.9740 | 2.00% | Continuous non-parametric density thresholding on DeepLog. |
-| **V4** | **Bi-LSTM + Attention + Adaptive KDE** | **Gaussian KDE ($\alpha=0.02$)** | **0.9317** | **5.50%** | Adds attention attribution; designed for complex vocabularies. |
+| **V1** | Unidirectional LSTM (DeepLog) | Static Top-9 | 0.8377 | 23.25% | Static cutoff over-flags concurrent telemetry branches. |
+| **V2** | Positional Pad-Masked Bi-LSTM + 4-Head Attention | Static Top-9 | 0.7818 | 27.25% | Sharper logits let stealthy violations slip inside Top-9. |
+| **V3** | DeepLog + Adaptive KDE | Gaussian KDE ($\alpha=0.02$) | 0.9639 | 4.50% | Continuous CDF thresholding cuts FPR by >80% vs Top-9. |
+| **V4** | **CyberGuard AI (Bi-LSTM + Attention + Adaptive KDE)** | **Gaussian KDE ($\alpha=0.02$)** | **0.9736** | **3.25%** | **Best overall precision, F1, lowest FPR (3.25%), 100% recall + XAI.** |
 
 ---
 
@@ -268,13 +268,12 @@ CyberGuard AI includes built-in real-world attack simulation generators to test 
 
 ## 9. Full-Stack SOC Monitoring Interface
 
-CyberGuard AI includes a standalone, production-grade Security Operations Center (SOC) dashboard:
+CyberGuard AI includes a standalone, interactive Security Operations Center (SOC) workbench:
 
-* **Dark-Mode Visual Design:** Styled with curated CSS tokens, high-contrast indicators, and glassmorphic panels.
-* **Live Telemetry Ticker:** Tracks Total Logs Analyzed, Anomalies Detected, Anomaly Rate %, and Average Inference Latency.
-* **Interactive Threat Testing:** Features a one-click **"Simulate Attack"** button that automatically injects realistic distributed attack sequences.
-* **Token-Level Attribution Heatmap:** Renders dynamic visual attribution heatmaps based on attention weights, highlighting which preceding log events the model weighed most heavily — serving as triage hints for analysts.
-* **Live Audit Log:** Chronological table recording timestamped event IDs, confidence metrics, and threat status.
+* **Dark-Mode Command Center:** Styled with curated CSS tokens, high-contrast indicators, and glassmorphic panels.
+* **Live Gaussian KDE & NLL Spike Plots:** Pure inline SVG charts plotting the fitted normal validation density $\hat{f}(x)$, threshold $\tau$, live session marker, and per-event NLL spike bars.
+* **Multi-Scenario Attack & File Ingestion:** One-click simulation across **Zero-Day Security Intrusion**, **Stealthy INFO Order Violation**, and **Long-Range Lifecycle Skip**, plus drag/upload `.log` file analysis with automatic `blk_*` Block-ID session partitioning and live Loghub HDFS stream replay.
+* **Human-Readable XAI Triage Panel:** Auto-generated root-cause diagnostic summary paired with pad-masked multi-head attention tiles showing exact line numbers and Drain3 templates.
 
 ---
 
@@ -286,10 +285,15 @@ The FastAPI microservice serves interactive Swagger documentation at `http://127
 
 | Endpoint | Method | Request Payload | Response | Description |
 |---|:---:|---|---|---|
-| `/api/health` | `GET` | None | `{"status": "healthy", "kde_threshold": 2.31, ...}` | System readiness, device, and active KDE threshold. |
-| `/api/stats` | `GET` | None | `{"total_analyzed": 142, "anomalies_detected": 12, ...}` | Aggregated SOC telemetry and average latency. |
-| `/api/simulate-attack` | `GET` | None | `{"attack_type": "...", "logs": [...]}` | Generates an authentic multi-stage attack sequence. |
-| `/api/analyze` | `POST` | `{"raw_logs": [...], "session_id": "..."}` | `{"anomaly_detected": true, "session_max_nll": 5.12, "session_mean_nll": 3.42, ...}` | Ingests raw logs, computes session-level max & mean NLL vs KDE threshold. |
+| `/api/health` | `GET` | None | `{"status": "healthy", "kde_threshold": 3.5831, ...}` | System readiness, device, OpenSearch status, and active KDE threshold. |
+| `/api/stats` | `GET` | None | `{"total_analyzed": 142, "anomalies_detected": 12, ...}` | Aggregated SOC telemetry and average latency (plus `/api/stats/reset`). |
+| `/api/kde-curve` | `GET` | None | `{"x": [...], "pdf": [...], "threshold": 3.5831}` | Sampled Gaussian KDE PDF coordinates for live plotting. |
+| `/api/benchmark` | `GET` | None | `{"available": true, "rows": [...]}` | Live empirical benchmark table served from `benchmark_results.csv`. |
+| `/api/sample-hdfs` | `GET` | Query `?limit=60` | `{"source": "Loghub HDFS_2k.log", "logs": [...]}` | Streams authentic lines from `HDFS_sample.log` for replay demos. |
+| `/api/simulate-attack` | `GET` | Query `?scenario=...` | `{"scenario": "...", "attack_type": "...", "logs": [...]}` | Multi-scenario attack vectors (`zero_day`, `order_violation`, `long_range`). |
+| `/api/analyze` | `POST` | `{"raw_logs": [...], "session_id": "..."}` | `{"anomaly_detected": true, "triage_summary": "...", ...}` | Parses via frozen Drain3, computes batched NLL vs KDE $\tau$ and XAI context. |
+| `/api/analyze-batch` | `POST` | `{"raw_logs": [...], "auto_group": true}` | `{"total_sessions": N, "sessions": [...]}` | Partitions mixed logs by `blk_*` Block ID and ranks anomalous sessions first. |
+| `/api/analyze-file` | `POST` | Multipart `.log`/`.txt` | `{"total_sessions": N, "sessions": [...]}` | Analyzes uploaded log files with automatic Block-ID sessionization. |
 
 ### Sample POST `/api/analyze` Request
 
@@ -354,22 +358,24 @@ cyberguard-ai/
     │   ├── index.html                      # SOC dashboard interface
     │   ├── styles.css                      # Modern dark-mode styling
     │   └── app.js                          # Dashboard logic, heatmaps & API caller
-    ├── models/checkpoints/                 # Serialized model weights & KDE estimators
+    ├── models/checkpoints/                 # Serialized model weights, Drain3 & KDE estimators
     │   ├── attention_bilstm_best.pt        # Trained Bi-LSTM + Attention weights
     │   ├── attention_bilstm_kde.pkl        # Fitted Gaussian KDE estimator
     │   ├── deeplog_best.pt                 # Trained DeepLog baseline weights
-    │   └── deeplog_kde.pkl                 # Fitted baseline KDE estimator
+    │   ├── deeplog_kde.pkl                 # Fitted baseline KDE estimator
+    │   └── drain3_parser.pkl               # Frozen Drain3 tree & vocabulary state
     ├── src/
     │   ├── __init__.py
-    │   ├── parser.py                       # Drain3 streaming log parser
+    │   ├── parser.py                       # Drain3 parser (online + frozen OOV matching)
     │   ├── session.py                      # Sliding window session generator
-    │   ├── dataset.py                      # PyTorch Dataset and DataLoader
+    │   ├── dataset.py                      # Causal PyTorch Dataset and DataLoader
     │   ├── threshold.py                    # Adaptive Gaussian KDE threshold calibrator
     │   ├── train.py                        # Model training engine
-    │   ├── evaluate.py                     # Benchmark evaluation suite
+    │   ├── evaluate.py                     # Batched benchmark evaluation suite
+    │   ├── integrations.py                 # Optional OpenSearch alert sink
     │   └── models/
     │       ├── __init__.py
-    │       ├── attention_bilstm.py         # Proposed Bi-LSTM + Attention network
+    │       ├── attention_bilstm.py         # Positional Pad-Masked Bi-LSTM + Attention
     │       └── deeplog.py                  # Baseline DeepLog architecture
     ├── tests/
     │   ├── test_pipeline.py                # Pipeline, parser & KDE unit tests
@@ -438,19 +444,22 @@ pytest tests/ -v
 **Expected output:**
 ```
 ============================= test session starts =============================
-collected 9 items
+collected 12 items
 
-tests/test_api_endpoints.py::test_health_endpoint PASSED                 [ 11%]
-tests/test_api_endpoints.py::test_stats_endpoint PASSED                  [ 22%]
-tests/test_api_endpoints.py::test_simulate_attack_endpoint PASSED        [ 33%]
-tests/test_api_endpoints.py::test_analyze_endpoint_anomaly PASSED        [ 44%]
-tests/test_api_endpoints.py::test_analyze_endpoint_normal PASSED         [ 55%]
-tests/test_pipeline.py::test_drain3_parser PASSED                         [ 66%]
-tests/test_pipeline.py::test_sliding_window_sessionizer PASSED           [ 77%]
-tests/test_pipeline.py::test_model_forward_pass PASSED                   [ 88%]
-tests/test_pipeline.py::test_adaptive_kde_threshold PASSED               [100%]
+tests/test_api_endpoints.py::test_health_endpoint PASSED                 [  8%]
+tests/test_api_endpoints.py::test_stats_and_reset_endpoints PASSED       [ 16%]
+tests/test_api_endpoints.py::test_kde_curve_and_benchmark_endpoints PASSED [ 25%]
+tests/test_api_endpoints.py::test_simulate_attack_scenarios PASSED       [ 33%]
+tests/test_api_endpoints.py::test_analyze_normal_and_attack_sessions PASSED [ 41%]
+tests/test_api_endpoints.py::test_analyze_batch_multi_block_partitioning PASSED [ 50%]
+tests/test_pipeline.py::test_drain3_parser_and_frozen_oov_match PASSED   [ 58%]
+tests/test_pipeline.py::test_group_logs_by_session PASSED                [ 66%]
+tests/test_pipeline.py::test_sliding_window_causal_alignment PASSED      [ 75%]
+tests/test_pipeline.py::test_model_forward_pass_and_pad_masking PASSED   [ 83%]
+tests/test_pipeline.py::test_adaptive_kde_threshold PASSED               [ 91%]
+tests/test_pipeline.py::test_session_nll_computation PASSED              [100%]
 
-============================== 9 passed in 3.13s ==============================
+============================== 12 passed in 5.25s ==============================
 ```
 
 ---
